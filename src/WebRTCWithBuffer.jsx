@@ -14,6 +14,8 @@ import Peer from "peerjs";
 
 // --- CONFIG ---
 // const TEXT_API_URL = process.env.REACT_APP_TEXT_API_URL || ""; // provide your endpoint
+
+const GEMINI_API_KEY="Akdwinskgeignkszifw"; 
 const iceServers = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
@@ -22,7 +24,7 @@ const iceServers = [
   { urls: "stun:stun4.l.google.com:19302" },
 ];
 
-const TEXT_API_URL=""
+const TEXT_API_URL = "";
 const peerConfig = {
   host: "0.peerjs.com",
   port: 443,
@@ -47,10 +49,10 @@ export default function WebRTCWithTranslation1() {
   const [callStatus, setCallStatus] = useState(CallStatus.DISCONNECTED);
   const [incomingCall, setIncomingCall] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
-const DIRECTIONS = {
-  JA_EN: { source: "ja", target: "en" },
-  EN_JA: { source: "en", target: "ja" },
-};
+  const DIRECTIONS = {
+    JA_EN: { source: "ja", target: "en" },
+    EN_JA: { source: "en", target: "ja" },
+  };
   const [activeDirection, setActiveDirection] = useState(null);
   const [translationStatus, setTranslationStatus] = useState("");
 
@@ -62,7 +64,9 @@ const DIRECTIONS = {
   // translation UI
   const [sourceLang, setSourceLang] = useState("");
   const [targetLang, setTargetLang] = useState("ja"); // e.g., Hindi captions
-  const [remoteFloatingText, setRemoteFloatingText] = useState("");
+  // const [remoteFloatingText, setRemoteFloatingText] = useState("");
+  const [remoteFloatingTexts, setRemoteFloatingTexts] = useState([]);
+
   const [isTranslating, setIsTranslating] = useState(false);
 
   // speech recognition
@@ -92,21 +96,19 @@ const DIRECTIONS = {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream]);
-  
+
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
 
-
   useEffect(() => {
-  if (isSpeechActive) {
-    stopSpeechRecognition();
-    setTimeout(startSpeechRecognition, 150);
-  }
-}, [activeDirection]);
-
+    if (isSpeechActive) {
+      stopSpeechRecognition();
+      setTimeout(startSpeechRecognition, 150);
+    }
+  }, [activeDirection]);
 
   // Update translator ref
   useEffect(() => {
@@ -129,12 +131,24 @@ const DIRECTIONS = {
     console.log(`[${tag}]`, ...rest);
   }, []);
 
+
+   // addRemoteCaption helper
+    const addRemoteCaption = useCallback((text) => {
+    const id = Date.now() + Math.random();
+
+    setRemoteFloatingTexts((prev) => [...prev, { id, text }]);
+
+    setTimeout(() => {
+      setRemoteFloatingTexts((prev) => prev.filter((item) => item.id !== id));
+    }, 5000);
+  }, []);
   // -----------------------------------
   // Helper: getTranslatorAPI
   // -----------------------------------
   const getTranslatorAPI = useCallback(() => {
     if (self.translation) return self.translation; // Old standard
-    if (self.window && self.window.ai && self.window.ai.translator) return self.window.ai.translator; // Newest standard
+    if (self.window && self.window.ai && self.window.ai.translator)
+      return self.window.ai.translator; // Newest standard
     if (self.Translator) return self.Translator; // Alternative
     return null;
   }, []);
@@ -142,62 +156,61 @@ const DIRECTIONS = {
   // -----------------------------------
   // Initialize Translator (requires user gesture)
   // -----------------------------------
-const initializeTranslatorFor = useCallback(
-  async (directionKey) => {
-    try {
-      // 1️⃣ If some translator already exists → destroy it
-      if (translatorRef.current) {
-        try {
-          translatorRef.current.destroy?.(); // if supported
-        } catch {}
-        setTranslator(null);
+  const initializeTranslatorFor = useCallback(
+    async (directionKey) => {
+      try {
+        // 1️⃣ If some translator already exists → destroy it
+        if (translatorRef.current) {
+          try {
+            translatorRef.current.destroy?.(); // if supported
+          } catch {}
+          setTranslator(null);
+        }
+
+        // 2️⃣ Update UI state FIRST
+        setActiveDirection(directionKey);
+
+        const { source, target } = DIRECTIONS[directionKey];
+        setSourceLang(source);
+        setTargetLang(target);
+
+        // 3️⃣ Normal initialization logic
+        const api = getTranslatorAPI();
+        if (!api) {
+          setTranslationStatus("API not found");
+          return;
+        }
+
+        setTranslationStatus("Checking availability...");
+
+        const languagePair = {
+          sourceLanguage: source,
+          targetLanguage: target,
+        };
+
+        let availability = "readily";
+        if (api.canTranslate) {
+          availability = await api.canTranslate(languagePair);
+        }
+
+        if (availability === "no") {
+          setTranslationStatus("Model not available");
+          return;
+        }
+
+        setTranslationStatus("Creating translator...");
+
+        const createFn = api.create || api.createTranslator;
+        const trans = await createFn.call(api, languagePair);
+
+        setTranslator(trans);
+        setTranslationStatus("Translator ready");
+      } catch (err) {
+        setTranslationStatus(`Error: ${err.message}`);
       }
-
-      // 2️⃣ Update UI state FIRST
-      setActiveDirection(directionKey);
-
-      const { source, target } = DIRECTIONS[directionKey];
-      setSourceLang(source);
-      setTargetLang(target);
-
-      // 3️⃣ Normal initialization logic
-      const api = getTranslatorAPI();
-      if (!api) {
-        setTranslationStatus("API not found");
-        return;
-      }
-
-      setTranslationStatus("Checking availability...");
-
-      const languagePair = {
-        sourceLanguage: source,
-        targetLanguage: target,
-      };
-
-      let availability = "readily";
-      if (api.canTranslate) {
-        availability = await api.canTranslate(languagePair);
-      }
-
-      if (availability === "no") {
-        setTranslationStatus("Model not available");
-        return;
-      }
-
-      setTranslationStatus("Creating translator...");
-
-      const createFn = api.create || api.createTranslator;
-      const trans = await createFn.call(api, languagePair);
-
-      setTranslator(trans);
-      setTranslationStatus("Translator ready");
-
-    } catch (err) {
-      setTranslationStatus(`Error: ${err.message}`);
-    }
-  },
-  [getTranslatorAPI]
-);
+    },
+    [getTranslatorAPI]
+  );
 
   // -----------------------------------
   // Media Control Functions
@@ -218,12 +231,19 @@ const initializeTranslatorFor = useCallback(
 
   const toggleScreenShare = useCallback(async () => {
     if (isScreenSharing) {
-      // Stop screenshare, switch back to camera
+      // Stop screenshare, switch back to camera if available
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const videoTrack = stream.getVideoTracks()[0];
+        let videoTrack = null;
+        if (isCameraOn) {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          videoTrack = stream.getVideoTracks()[0];
+        }
         if (callRef.current) {
-          const sender = callRef.current.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+          const sender = callRef.current.peerConnection
+            .getSenders()
+            .find((s) => s.track && s.track.kind === "video");
           if (sender) {
             sender.replaceTrack(videoTrack);
           }
@@ -231,9 +251,9 @@ const initializeTranslatorFor = useCallback(
         videoTrackRef.current = videoTrack;
         setIsScreenSharing(false);
         // Update local stream for display
-        setLocalStream(prev => {
+        setLocalStream((prev) => {
           const newStream = new MediaStream();
-          newStream.addTrack(videoTrack);
+          if (videoTrack) newStream.addTrack(videoTrack);
           if (audioTrackRef.current) newStream.addTrack(audioTrackRef.current);
           return newStream;
         });
@@ -243,10 +263,14 @@ const initializeTranslatorFor = useCallback(
     } else {
       // Start screenshare
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+        });
         const videoTrack = stream.getVideoTracks()[0];
         if (callRef.current) {
-          const sender = callRef.current.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+          const sender = callRef.current.peerConnection
+            .getSenders()
+            .find((s) => s.track && s.track.kind === "video");
           if (sender) {
             sender.replaceTrack(videoTrack);
           }
@@ -254,7 +278,7 @@ const initializeTranslatorFor = useCallback(
         videoTrackRef.current = videoTrack;
         setIsScreenSharing(true);
         // Update local stream for display
-        setLocalStream(prev => {
+        setLocalStream((prev) => {
           const newStream = new MediaStream();
           newStream.addTrack(videoTrack);
           if (audioTrackRef.current) newStream.addTrack(audioTrackRef.current);
@@ -281,7 +305,9 @@ const initializeTranslatorFor = useCallback(
         const prompt = `Translate this text to ${targetLang}: "${text}"`;
         const payload = {
           contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: "Return only the translated text." }] },
+          systemInstruction: {
+            parts: [{ text: "Return only the translated text." }],
+          },
         };
 
         // const res = await fetch(TEXT_API_URL, {
@@ -296,7 +322,7 @@ const initializeTranslatorFor = useCallback(
         //   json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
         //   json?.translatedText ||
         //   "";
-        return  text;
+        return text;
       } catch (err) {
         console.error("translateText error:", err);
         return text; // fallback to original
@@ -316,244 +342,214 @@ const initializeTranslatorFor = useCallback(
   // -----------------------------------
   // Initialize Peer + getUserMedia
   // -----------------------------------
-const initializePeer = useCallback(async () => {
-  // Prevent double initialization
-  if (peerRef.current) return;
+  const initializePeer = useCallback(async () => {
+    // Prevent double initialization
+    if (peerRef.current) return;
 
-  setCallStatus(CallStatus.CONNECTING);
+    setCallStatus(CallStatus.CONNECTING);
 
-  try {
-    // Always get full media; mute/unmute tracks later
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
-
-    setLocalStream(stream);
-    videoTrackRef.current = stream.getVideoTracks()[0] || null;
-    audioTrackRef.current = stream.getAudioTracks()[0] || null;
-
-    const peer = new Peer(undefined, {
-      ...peerConfig,
-      pingInterval: 5000, // keep WS alive
-      debug: 2,
-    });
-
-    peerRef.current = peer;
-
-    peer.on("open", (id) => {
-      addLog("peer", "open", id);
-      setMyPeerId(id);
-      setCallStatus(CallStatus.READY);
-    });
-
-    // Incoming data channel
-    peer.on("connection", (conn) => {
-      addLog("peer", "data-connection", conn.peer);
-      setupDataConnection(conn);
-    });
-
-    // Incoming media call
-    peer.on("call", (call) => {
-      addLog("peer", "incoming-call", call.peer);
-      setIncomingCall(call);
-    });
-
-    // 🔴 IMPORTANT: reconnect on signaling drop
-    peer.on("disconnected", () => {
-      addLog("peer", "disconnected – reconnecting");
-      setCallStatus(CallStatus.CONNECTING);
-
+    try {
+      // Try to get video and audio; if video fails, get audio only
+      let stream;
       try {
-        peer.reconnect();
-      } catch (e) {
-        console.error("peer reconnect failed", e);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+      } catch (videoErr) {
+        console.warn("Camera access denied, trying audio only", videoErr);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: true,
+        });
+        setIsCameraOn(false);
       }
-    });
 
-    peer.on("error", (err) => {
-      console.error("peer error", err);
-      setErrorMsg(err?.message || "Peer error");
-    });
+      setLocalStream(stream);
+      videoTrackRef.current = stream.getVideoTracks()[0] || null;
+      audioTrackRef.current = stream.getAudioTracks()[0] || null;
 
-    peer.on("close", () => {
-      addLog("peer", "closed");
-      setCallStatus(CallStatus.DISCONNECTED);
-    });
-  } catch (err) {
-    console.error("initializePeer error", err);
-    setErrorMsg("Camera / Microphone access denied");
-    setCallStatus(CallStatus.DISCONNECTED);
-  }
-}, [addLog, peerConfig]);
-
-
-useEffect(() => {
-  initializePeer();
-
-  return () => {
-    // 🔇 Stop speech recognition safely
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.stop?.();
-      } catch {}
-      recognitionRef.current = null;
-    }
-
-    // 📞 Close active call
-    if (callRef.current) {
-      try {
-        callRef.current.close();
-      } catch {}
-      callRef.current = null;
-    }
-
-    // 📡 Close data channel
-    if (dataConnRef.current) {
-      try {
-        dataConnRef.current.close();
-      } catch {}
-      dataConnRef.current = null;
-    }
-
-    // ❗ DO NOT destroy peer here
-    // peerRef.current.destroy(); ❌
-    // Peer must survive component remounts
-
-    // 🎤 Stop media tracks
-    if (localStream) {
-      localStream.getTracks().forEach((t) => {
-        try {
-          t.stop();
-        } catch {}
+      const peer = new Peer(undefined, {
+        ...peerConfig,
+        pingInterval: 5000, // keep WS alive
+        debug: 2,
       });
-    }
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
 
-const leaveCall = () => {
-  if (peerRef.current) {
-    peerRef.current.destroy(); // ✅ ONLY HERE
-    peerRef.current = null;
-  }
-  setCallStatus(CallStatus.DISCONNECTED);
-};
+      peerRef.current = peer;
+
+      peer.on("open", (id) => {
+        addLog("peer", "open", id);
+        setMyPeerId(id);
+        setCallStatus(CallStatus.READY);
+      });
+
+      // Incoming data channel
+      peer.on("connection", (conn) => {
+        addLog("peer", "data-connection", conn.peer);
+        setupDataConnection(conn);
+      });
+
+      // Incoming media call
+      peer.on("call", (call) => {
+        addLog("peer", "incoming-call", call.peer);
+        setIncomingCall(call);
+      });
+
+      // 🔴 IMPORTANT: reconnect on signaling drop
+      peer.on("disconnected", () => {
+        addLog("peer", "disconnected – reconnecting");
+        setCallStatus(CallStatus.CONNECTING);
+
+        try {
+          peer.reconnect();
+        } catch (e) {
+          console.error("peer reconnect failed", e);
+        }
+      });
+
+      peer.on("error", (err) => {
+        console.error("peer error", err);
+        setErrorMsg(err?.message || "Peer error");
+      });
+
+      peer.on("close", () => {
+        addLog("peer", "closed");
+        setCallStatus(CallStatus.DISCONNECTED);
+      });
+    } catch (err) {
+      console.error("initializePeer error", err);
+      setErrorMsg("Media access denied");
+      setCallStatus(CallStatus.DISCONNECTED);
+    }
+  }, [addLog, peerConfig]);
+
+  useEffect(() => {
+    initializePeer();
+
+    return () => {
+      // 🔇 Stop speech recognition safely
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.stop?.();
+        } catch {}
+        recognitionRef.current = null;
+      }
+
+      // 📞 Close active call
+      if (callRef.current) {
+        try {
+          callRef.current.close();
+        } catch {}
+        callRef.current = null;
+      }
+
+      // 📡 Close data channel
+      if (dataConnRef.current) {
+        try {
+          dataConnRef.current.close();
+        } catch {}
+        dataConnRef.current = null;
+      }
+
+      // ❗ DO NOT destroy peer here
+      // peerRef.current.destroy(); ❌
+      // Peer must survive component remounts
+
+      // 🎤 Stop media tracks
+      if (localStream) {
+        localStream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {}
+        });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const leaveCall = () => {
+    if (peerRef.current) {
+      peerRef.current.destroy(); // ✅ ONLY HERE
+      peerRef.current = null;
+    }
+    setCallStatus(CallStatus.DISCONNECTED);
+  };
   // -----------------------------------
   // Data connection helper
   // -----------------------------------
-  const setupDataConnection = useCallback(
-    (conn) => {
-      if (!conn) return;
-      if (dataConnRef.current && dataConnRef.current.peer !== conn.peer) {
-        try { dataConnRef.current.close(); } catch {}
-      }
-      dataConnRef.current = conn;
+const setupDataConnection = useCallback((conn) => {
+  if (!conn) return;
 
-      conn.on("open", () => {
-        addLog("data", "open ->", conn.peer);
-        try { conn.send(`TARGET_LANG:${targetLang}`); } 
-        catch (e) { addLog("data", "send TARGET_LANG failed", e.message); }
-      });
+  dataConnRef.current = conn;
 
-      conn.on("data", async (data) => {
-        // 1. Control Messages
-        if (typeof data === "string" && data.startsWith("TARGET_LANG:")) {
-          addLog("data", "remote target lang:", data.split(":")[1]);
-          return;
-        }
+  conn.on("data", async (data) => {
+    if (typeof data !== "string") return;
 
-        // 2. Text Messages
-        if (typeof data === "string") {
-          let finalText = data;
+    let finalText = data;
 
-          // --- CHROME AI INTEGRATION START ---
-          let currentTranslator = translatorRef.current;
-          if (!currentTranslator) {
-            // Do not auto-initialize to avoid NotAllowedError
-            setTranslationStatus("Translator needs manual initialization");
-            addLog("ai", "Translator not ready - requires download, click 'Initialize Translator'");
-            finalText = data; // no translation
-          }
-          if (currentTranslator) {
-            try {
-              setTranslationStatus("Translating...");
-              addLog("ai", "Translating text...");
-              finalText = await currentTranslator.translate(data);
-              setTranslationStatus("Translation complete");
-              addLog("ai", "Translation Complete!");
-              setTranslationStatus("");
-            } catch (err) {
-              setTranslationStatus(`Translation error: ${err.message}`);
-              addLog("ai", `Translation error: ${err.message}`);
-            }
-          }
-          // --- CHROME AI INTEGRATION END ---
+    const currentTranslator = translatorRef.current;
+    if (currentTranslator) {
+      try {
+        finalText = await currentTranslator.translate(data);
+      } catch {}
+    }
 
-          setRemoteFloatingText(finalText);
-          addLog("data", "received:", finalText);
-          setTimeout(() => setRemoteFloatingText(""), 5000);
-        }
-      });
-      
-      // Close/Error handlers...
-      conn.on("close", () => {
-         // ... (keep your existing cleanup code here)
-      });
-      conn.on("error", (err) => {
-         // ... (keep your existing error code here)
-      });
-    },
-    [addLog, targetLang]
-  );
+    addRemoteCaption(finalText);
+  });
+}, [addRemoteCaption]);
+
+
+  // Helper to add floating caption
+
 
   // Update data handler when translator changes
-  useEffect(() => {
-    if (dataConnRef.current) {
-      dataConnRef.current.on("data", async (data) => {
-        // 1. Control Messages
-        if (typeof data === "string" && data.startsWith("TARGET_LANG:")) {
-          addLog("data", "remote target lang:", data.split(":")[1]);
-          return;
-        }
+  // useEffect(() => {
+  //   if (dataConnRef.current) {
+  //     dataConnRef.current.on("data", async (data) => {
+  //       // 1. Control Messages
+  //       if (typeof data === "string" && data.startsWith("TARGET_LANG:")) {
+  //         addLog("data", "remote target lang:", data.split(":")[1]);
+  //         return;
+  //       }
 
-        // 2. Text Messages
-        if (typeof data === "string") {
-          let finalText = data;
+  //       // 2. Text Messages
+  //       if (typeof data === "string") {
+  //         let finalText = data;
 
-          // --- CHROME AI INTEGRATION START ---
-          let currentTranslator = translatorRef.current;
-          if (!currentTranslator) {
-            // Do not auto-initialize to avoid NotAllowedError
-            setTranslationStatus("Translator needs manual initialization");
-            addLog("ai", "Translator not ready - requires download, click 'Initialize Translator'");
-            finalText = data; // no translation
-          }
-          if (currentTranslator) {
-            try {
-              setTranslationStatus("Translating...");
-              addLog("ai", "Translating text...");
-              finalText = await currentTranslator.translate(data);
-              setTranslationStatus("Translation complete");
-              addLog("ai", "Translation Complete!");
-              setTranslationStatus("");
-            } catch (err) {
-              setTranslationStatus(`Translation error: ${err.message}`);
-              addLog("ai", `Translation error: ${err.message}`);
-            }
-          }
-          // --- CHROME AI INTEGRATION END ---
+  //         // --- CHROME AI INTEGRATION START ---
+  //         let currentTranslator = translatorRef.current;
+  //         if (!currentTranslator) {
+  //           // Do not auto-initialize to avoid NotAllowedError
+  //           setTranslationStatus("Translator needs manual initialization");
+  //           addLog(
+  //             "ai",
+  //             "Translator not ready - requires download, click 'Initialize Translator'"
+  //           );
+  //           finalText = data; // no translation
+  //         }
+  //         if (currentTranslator) {
+  //           try {
+  //             setTranslationStatus("Translating...");
+  //             addLog("ai", "Translating text...");
+  //             finalText = await currentTranslator.translate(data);
+  //             setTranslationStatus("Translation complete");
+  //             addLog("ai", "Translation Complete!");
+  //             setTranslationStatus("");
+  //           } catch (err) {
+  //             setTranslationStatus(`Translation error: ${err.message}`);
+  //             addLog("ai", `Translation error: ${err.message}`);
+  //           }
+  //         }
+  //         // --- CHROME AI INTEGRATION END ---
 
-          setRemoteFloatingText(finalText);
-          addLog("data", "received:", finalText);
-          setTimeout(() => setRemoteFloatingText(""), 5000);
-        }
-      });
-    }
-  }, [translator, addLog]);
+  //         addRemoteCaption(finalText);
+  //       }
+  //     });
+  //   }
+  // }, [translator, addLog]);
 
   // -----------------------------------
   // Start Call (initiator)
@@ -571,7 +567,10 @@ const leaveCall = () => {
       setErrorMsg("Enter remote Peer ID.");
       return;
     }
-    if (callStatus !== CallStatus.READY && callStatus !== CallStatus.DISCONNECTED) {
+    if (
+      callStatus !== CallStatus.READY &&
+      callStatus !== CallStatus.DISCONNECTED
+    ) {
       addLog("call", "invalid status for starting a call", callStatus);
       // don't block, but return
       return;
@@ -688,7 +687,7 @@ const leaveCall = () => {
   // -----------------------------------
   // Speech Recognition (minimal)
   // -----------------------------------
-// 1. Add this REF at the top of your component (inside the function)
+  // 1. Add this REF at the top of your component (inside the function)
   // This tracks if the user WANTS STT to be on, regardless of what the browser thinks.
   const isSpeechActiveRef = useRef(false);
 
@@ -697,7 +696,9 @@ const leaveCall = () => {
   // -----------------------------------
   const startSpeechRecognition = useCallback(() => {
     // Basic Check
-    if (!("SpeechRecognition" in window || "webkitSpeechRecognition" in window)) {
+    if (
+      !("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
+    ) {
       setErrorMsg("SpeechRecognition not supported.");
       return;
     }
@@ -708,77 +709,77 @@ const leaveCall = () => {
 
     // Define the runner function
     const startInstance = () => {
-        // If user pressed "Stop", don't restart
-        if (!isSpeechActiveRef.current) return;
+      // If user pressed "Stop", don't restart
+      if (!isSpeechActiveRef.current) return;
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        
-        // ⚠️ THE MAGIC FIX: Set this to FALSE
-        // This prevents the "Zombie" freeze. It stops after every sentence,
-        // allowing us to cleanly restart it in 'onend'.
-        recognition.continuous = false; 
-        
-        recognition.lang = sourceLang || "en-US";
-        recognition.interimResults = false;
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
 
-        recognition.onresult = async (ev) => {
-            try {
-                const transcript = ev.results[0][0].transcript.trim();
-                if (transcript.length > 0) {
-                    addLog("stt", "transcript:", transcript);
-                    
-                    // Translate & Send
-                    const translated = await translateText(transcript);
-                    if (dataConnRef.current && dataConnRef.current.open) {
-                        dataConnRef.current.send(translated);
-                        addLog("data-send", translated);
-                    }
-                }
-            } catch (err) {
-                console.error("onresult processing error", err);
-            }
-        };
+      // ⚠️ THE MAGIC FIX: Set this to FALSE
+      // This prevents the "Zombie" freeze. It stops after every sentence,
+      // allowing us to cleanly restart it in 'onend'.
+      recognition.continuous = false;
 
-        // ERROR HANDLER: If it errors (like 'no-speech'), just restart
-        recognition.onerror = (event) => {
-            // Ignore trivial errors, but log others
-            if (event.error !== 'no-speech') {
-                addLog("stt", "error (restarting):", event.error);
-            }
-        };
+      recognition.lang = sourceLang || "en-US";
+      recognition.interimResults = false;
 
-        // ON END: The vital loop
-        recognition.onend = () => {
-            // If the user still wants it on, RESTART immediately
-            if (isSpeechActiveRef.current) {
-                // Small delay prevents CPU overload if it crashes rapidly
-                setTimeout(() => {
-                    try {
-                        startInstance(); // <--- RECURSIVE RESTART
-                    } catch (e) {
-                        console.log("Restart failed", e);
-                    }
-                }, 100); 
-            } else {
-                addLog("stt", "Stopped manually.");
-            }
-        };
-
-        // Save reference so we can kill it manually if needed
-        recognitionRef.current = recognition;
-
+      recognition.onresult = async (ev) => {
         try {
-            recognition.start();
+          const transcript = ev.results[0][0].transcript.trim();
+          if (transcript.length > 0) {
+            // addLog("stt", "transcript:", transcript);
+
+            // Translate & Send
+            const translated = await translateText(transcript);
+            if (dataConnRef.current && dataConnRef.current.open) {
+              dataConnRef.current.send(translated);
+              // addLog("data-send", translated);
+            }
+          }
         } catch (err) {
-            // Sometimes it says "already started", which is fine.
+          console.error("onresult processing error", err);
         }
+      };
+
+      // ERROR HANDLER: If it errors (like 'no-speech'), just restart
+      recognition.onerror = (event) => {
+        // Ignore trivial errors, but log others
+        if (event.error !== "no-speech") {
+          addLog("stt", "error (restarting):", event.error);
+        }
+      };
+
+      // ON END: The vital loop
+      recognition.onend = () => {
+        // If the user still wants it on, RESTART immediately
+        if (isSpeechActiveRef.current) {
+          // Small delay prevents CPU overload if it crashes rapidly
+          setTimeout(() => {
+            try {
+              startInstance(); // <--- RECURSIVE RESTART
+            } catch (e) {
+              console.log("Restart failed", e);
+            }
+          }, 1);
+        } else {
+          addLog("stt", "Stopped manually.");
+        }
+      };
+
+      // Save reference so we can kill it manually if needed
+      recognitionRef.current = recognition;
+
+      try {
+        recognition.start();
+      } catch (err) {
+        // Sometimes it says "already started", which is fine.
+      }
     };
 
     // Kick off the loop
     startInstance();
     addLog("stt", "Started (Robust Mode)");
-
   }, [addLog, sourceLang, translateText]);
 
   const stopSpeechRecognition = useCallback(() => {
@@ -805,10 +806,14 @@ const leaveCall = () => {
   // -----------------------------------
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-center text-blue-400">WebRTC Video Call with Translation</h1>
+      <h1 className="text-3xl font-bold mb-6 text-center text-blue-400">
+        WebRTC Video Call with Translation
+      </h1>
 
       {errorMsg && (
-        <div className="bg-red-600 p-4 rounded-lg text-white mb-4">{errorMsg}</div>
+        <div className="bg-red-600 p-4 rounded-lg text-white mb-4">
+          {errorMsg}
+        </div>
       )}
 
       <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -826,14 +831,16 @@ const leaveCall = () => {
         <div className="relative bg-gray-800 p-4 rounded-lg">
           <h4 className="font-semibold mb-3 text-blue-300">Remote Video</h4>
 
-          {remoteFloatingText && (
-            <div
-              className="absolute left-1/2 transform -translate-x-1/2 bottom-4 px-4 py-2 rounded-lg text-white text-sm bg-black bg-opacity-70"
-              style={{ zIndex: 20 }}
-            >
-              {remoteFloatingText}
-            </div>
-          )}
+          <div className="absolute left-1/2 transform -translate-x-1/2 bottom-4 space-y-2 z-20">
+            {remoteFloatingTexts.map((item) => (
+              <div
+                key={item.id}
+                className="px-4 py-2 rounded-lg text-white text-sm bg-black bg-opacity-70"
+              >
+                {item.text}
+              </div>
+            ))}
+          </div>
 
           <video
             ref={remoteVideoRef}
@@ -846,7 +853,9 @@ const leaveCall = () => {
 
       <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gray-800 p-4 rounded-lg">
-          <label className="block text-sm font-medium text-blue-300 mb-2">Your Peer ID</label>
+          <label className="block text-sm font-medium text-blue-300 mb-2">
+            Your Peer ID
+          </label>
           <input
             readOnly
             value={myPeerId}
@@ -855,7 +864,9 @@ const leaveCall = () => {
         </div>
 
         <div className="bg-gray-800 p-4 rounded-lg">
-          <label className="block text-sm font-medium text-blue-300 mb-2">Friend's Peer ID</label>
+          <label className="block text-sm font-medium text-blue-300 mb-2">
+            Friend's Peer ID
+          </label>
           <input
             value={remotePeerId}
             onChange={(e) => setRemotePeerId(e.target.value)}
@@ -873,7 +884,9 @@ const leaveCall = () => {
             onChange={(e) => setSourceLang(e.target.value)}
             className="px-4 py-2 border border-gray-600 rounded-lg bg-gray-700 text-white"
           >
-            <option value="" disabled>Select Source Language</option>
+            <option value="" disabled>
+              Select Source Language
+            </option>
             <option value="en">English (US)</option>
             <option value="es">Spanish (ES)</option>
             <option value="hi">Hindi (India)</option>
@@ -887,7 +900,9 @@ const leaveCall = () => {
             onChange={(e) => setTargetLang(e.target.value)}
             className="px-4 py-2 border border-gray-600 rounded-lg bg-gray-700 text-white"
           >
-            <option value="" disabled>Select Target Language</option>
+            <option value="" disabled>
+              Select Target Language
+            </option>
             <option value="hi">Hindi</option>
             <option value="es">Spanish</option>
             <option value="fr">French</option>
@@ -900,41 +915,48 @@ const leaveCall = () => {
             onClick={toggleSpeech}
             disabled={!sourceLang}
             className={`px-4 py-2 rounded-lg font-medium ${
-              isSpeechActive ? "bg-yellow-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"
+              isSpeechActive
+                ? "bg-yellow-600 text-white"
+                : "bg-blue-600 text-white hover:bg-blue-700"
             } ${!sourceLang ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             {isSpeechActive ? "Stop STT" : "Start STT"}
           </button>
 
           <div className="flex gap-4">
-  <button
-    onClick={() => initializeTranslatorFor("JA_EN")}
-    className={`px-4 py-2 rounded-lg font-medium
-      ${activeDirection === "JA_EN"
-        ? "bg-green-600"
-        : "bg-gray-700 hover:bg-gray-600"}`}
-  >
-    JA → EN
-  </button>
+            <button
+              onClick={() => initializeTranslatorFor("JA_EN")}
+              className={`px-4 py-2 rounded-lg font-medium
+      ${
+        activeDirection === "JA_EN"
+          ? "bg-green-600"
+          : "bg-gray-700 hover:bg-gray-600"
+      }`}
+            >
+              JA → EN
+            </button>
 
-  <button
-    onClick={() => initializeTranslatorFor("EN_JA")}
-    className={`px-4 py-2 rounded-lg font-medium
-      ${activeDirection === "EN_JA"
-        ? "bg-green-600"
-        : "bg-gray-700 hover:bg-gray-600"}`}
-  >
-    EN → JA
-  </button>
-</div>
-
+            <button
+              onClick={() => initializeTranslatorFor("EN_JA")}
+              className={`px-4 py-2 rounded-lg font-medium
+      ${
+        activeDirection === "EN_JA"
+          ? "bg-green-600"
+          : "bg-gray-700 hover:bg-gray-600"
+      }`}
+            >
+              EN → JA
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={toggleMic}
             className={`px-4 py-2 rounded-lg font-medium ${
-              isMicOn ? "bg-green-600 text-white hover:bg-green-700" : "bg-red-600 text-white hover:bg-red-700"
+              isMicOn
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-red-600 text-white hover:bg-red-700"
             }`}
           >
             {isMicOn ? "Mic On" : "Mic Off"}
@@ -943,7 +965,9 @@ const leaveCall = () => {
           <button
             onClick={toggleCamera}
             className={`px-4 py-2 rounded-lg font-medium ${
-              isCameraOn ? "bg-green-600 text-white hover:bg-green-700" : "bg-red-600 text-white hover:bg-red-700"
+              isCameraOn
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-red-600 text-white hover:bg-red-700"
             }`}
           >
             {isCameraOn ? "Camera On" : "Camera Off"}
@@ -952,7 +976,9 @@ const leaveCall = () => {
           <button
             onClick={toggleScreenShare}
             className={`px-4 py-2 rounded-lg font-medium ${
-              isScreenSharing ? "bg-orange-600 text-white hover:bg-orange-700" : "bg-indigo-600 text-white hover:bg-indigo-700"
+              isScreenSharing
+                ? "bg-orange-600 text-white hover:bg-orange-700"
+                : "bg-indigo-600 text-white hover:bg-indigo-700"
             }`}
           >
             {isScreenSharing ? "Stop Share" : "Share Screen"}
@@ -983,7 +1009,9 @@ const leaveCall = () => {
       {incomingCall && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-6 rounded-lg shadow-lg space-y-4 max-w-sm w-full mx-4">
-            <h3 className="text-xl font-semibold text-blue-300">Incoming Call</h3>
+            <h3 className="text-xl font-semibold text-blue-300">
+              Incoming Call
+            </h3>
             <p className="text-gray-300">From: {incomingCall.peer}</p>
             <div className="flex space-x-4 justify-end">
               <button
@@ -1006,13 +1034,40 @@ const leaveCall = () => {
       <div className="mt-6 bg-gray-800 p-4 rounded-lg text-sm text-gray-300">
         <h4 className="font-semibold mb-2 text-blue-300">Status</h4>
         <div className="grid grid-cols-2 gap-2">
-          <div>Call Status: <span className="text-white">{callStatus}</span></div>
-          <div>Translating: <span className="text-white">{isTranslating ? "Yes" : "No"}</span></div>
-          <div>Data Channel: <span className="text-white">{dataConnRef.current ? (dataConnRef.current.open ? "Open" : "Closed") : "None"}</span></div>
-          <div>Translation Status: <span className="text-white">{translationStatus}</span></div>
-          <div>Mic: <span className="text-white">{isMicOn ? "On" : "Off"}</span></div>
-          <div>Camera: <span className="text-white">{isCameraOn ? "On" : "Off"}</span></div>
-          <div>Screen Share: <span className="text-white">{isScreenSharing ? "Active" : "Inactive"}</span></div>
+          <div>
+            Call Status: <span className="text-white">{callStatus}</span>
+          </div>
+          <div>
+            Translating:{" "}
+            <span className="text-white">{isTranslating ? "Yes" : "No"}</span>
+          </div>
+          <div>
+            Data Channel:{" "}
+            <span className="text-white">
+              {dataConnRef.current
+                ? dataConnRef.current.open
+                  ? "Open"
+                  : "Closed"
+                : "None"}
+            </span>
+          </div>
+          <div>
+            Translation Status:{" "}
+            <span className="text-white">{translationStatus}</span>
+          </div>
+          <div>
+            Mic: <span className="text-white">{isMicOn ? "On" : "Off"}</span>
+          </div>
+          <div>
+            Camera:{" "}
+            <span className="text-white">{isCameraOn ? "On" : "Off"}</span>
+          </div>
+          <div>
+            Screen Share:{" "}
+            <span className="text-white">
+              {isScreenSharing ? "Active" : "Inactive"}
+            </span>
+          </div>
         </div>
       </div>
     </div>
