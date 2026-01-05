@@ -15,7 +15,7 @@ import Peer from "peerjs";
 // --- CONFIG ---
 // const TEXT_API_URL = process.env.REACT_APP_TEXT_API_URL || ""; // provide your endpoint
 
-const GEMINI_API_KEY="Akdwinskgeignkszifkw"; 
+const GEMINI_API_KEY="Akdwinskgeignkszifw"; 
 const iceServers = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
